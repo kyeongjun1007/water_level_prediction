@@ -4,7 +4,7 @@ import pandas as pd
 
 import torch
 import torch.nn as nn
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import Dataset,TensorDataset, DataLoader
 from torch.autograd import Variable
 from tqdm import tqdm_notebook
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
@@ -53,40 +53,99 @@ del(df_rf, df_water)
 # data preprocessing
 del(data['fw_1018680'])
 
-X_ss = data.iloc[:-1,:]
-y_ms = data.iloc[1:,[6,8,10,12]]
-
-
-#ms = MinMaxScaler()
-#ss = StandardScaler()
+#X_ss = data.iloc[:-1,[0,1,2,3,4,5,7,10,12,13,14,15]]
+#y_ms = data.iloc[1:,[6,8,9,11]]
 #
-#X_ss = ss.fit_transform(X)
-#y_ms = ms.fit_transform(y)
+##ms = MinMaxScaler()
+##ss = StandardScaler()
+##
+##X_ss = ss.fit_transform(X)
+##y_ms = ms.fit_transform(y)
+#
+#X_ss  = np.array(X_ss)
+#y_ms = np.array(y_ms)
+#
+#k = len(data[data.index>='2022-06-01'])
+#
+#X_train = X_ss[:-k,:]
+#X_test = X_ss[-k:,:]
+#
+#y_train = y_ms[:-k,:]
+#y_test = y_ms[-k:,:]
+#
+#print('Training Shape', X_train.shape, y_train.shape)
+#print('Testing Shape', X_test.shape, y_test.shape)
+#
+#X_train_tensors = Variable(torch.Tensor(X_train))
+#X_test_tensors = Variable(torch.Tensor(X_test))
+#
+#y_train_tensors = Variable(torch.Tensor(y_train))
+#y_test_tensors = Variable(torch.Tensor(y_test))
+#
+#X_train_tensors_f = torch.reshape(X_train_tensors, (X_train_tensors.shape[0],
+#                                                    1,X_train_tensors.shape[1]))
+#X_test_tensors_f = torch.reshape(X_test_tensors, (X_test_tensors.shape[0],
+#                                                    1,X_test_tensors.shape[1]))
 
-X_ss  = np.array(X_ss)
-y_ms = np.array(y_ms)
+class SlidingWindow(Dataset) :
+    def __init__(self, data, window) :
+        self.data = data
+        self.window = window
+        
+    def __getitem__(self, index) :
+        x = self.data[index:index+self.window]
+        return x
+    
+    def __len__(self) :
+        return len(self.data) - self.window
 
+
+# data setting
+# submit 해야하는 기간 제외
 k = len(data[data.index>='2022-06-01'])
+data = data.iloc[:-k,:]
 
-X_train = X_ss[:-k,:]
-X_test = X_ss[-k:,:]
+X = data.iloc[:,[0,1,2,3,4,5,7,10,12,13,14,15]]
+y = data.iloc[:,[6,8,9,11]]
 
-y_train = y_ms[:-k,:]
-y_test = y_ms[-k:,:]
+# train_test_split
+k = int(len(data)*0.8)
+train_X = X.iloc[:k,:]
+test_X = X.iloc[k:,:]
 
-print('Training Shape', X_train.shape, y_train.shape)
-print('Testing Shape', X_test.shape, y_test.shape)
+train_y = y.iloc[:k,:]
+test_y = y.iloc[k:,:]
 
-X_train_tensors = Variable(torch.Tensor(X_train))
-X_test_tensors = Variable(torch.Tensor(X_test))
+# sliding window에 맞게 데이터 조정 (필요없는 앞, 뒤 잘라냄)
+window_size = 144
+train_X = train_X.iloc[:-(window_size-1),:]
+test_X = test_X.iloc[:-(window_size-1),:]
 
-y_train_tensors = Variable(torch.Tensor(y_train))
-y_test_tensors = Variable(torch.Tensor(y_test))
+train_y = train_y.iloc[(window_size-1):,:]
+test_y = test_y.iloc[(window_size-1):,:]
 
-X_train_tensors_f = torch.reshape(X_train_tensors, (X_train_tensors.shape[0],
-                                                    1,X_train_tensors.shape[1]))
-X_test_tensors_f = torch.reshape(X_test_tensors, (X_test_tensors.shape[0],
-                                                    1,X_test_tensors.shape[1]))
+# 각 y Variable 적용
+train_y = np.array(train_y, dtype=float)
+test_y = np.array(test_y, dtype=float)
+
+y_train_tensors = Variable(torch.Tensor(train_y))
+y_test_tensors = Variable(torch.Tensor(test_y))
+
+
+# 각 X DataLoader 생성
+train_X = torch.tensor(np.array(train_X, dtype=float))
+test_X = torch.tensor(np.array(test_X, dtype=float))
+
+train_x_dataset = SlidingWindow(data=train_X, window=144)
+train_dl = DataLoader(dataset=train_x_dataset,
+           batch_size=1,
+           shuffle=False)
+
+test_x_dataset = SlidingWindow(data=test_X, window=144)
+test_dl = DataLoader(dataset=test_x_dataset,
+           batch_size=1,
+           shuffle=False)
+
 
 class LSTM(nn.Module) :
     def __init__(self, num_classes, input_size, hidden_size, num_layers, seq_length) :
@@ -114,15 +173,15 @@ class LSTM(nn.Module) :
         out = self.fc(out)
         return out
 
-num_epochs = 1000
-learning_rate = 0.1
+num_epochs = 10
+learning_rate = 0.01
 
-input_size = 16
+input_size = 12
 hidden_size = 8
 num_layers = 1
 
 num_classes = 4
-seq_length = 1
+seq_length = 144
 
 model = LSTM(num_classes, input_size, hidden_size, num_layers, seq_length)
 
@@ -130,12 +189,15 @@ criterion = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
 for epoch in range(num_epochs) :
-    outputs = model.forward(X_train_tensors_f)
-    optimizer.zero_grad()
-    loss = criterion(outputs, y_train_tensors)
-    loss.backward()
+    for i, window in enumerate(train_dl):
+        window = window.type(torch.float32)
+        window = Variable(window)
+        optimizer.zero_grad()
+        outputs = model.forward(window)
+        loss = criterion(outputs, y_train_tensors[i].view(1,4))
+        loss.backward()
     
-    optimizer.step()
-    if epoch % 100 == 0 :
-        print("Epoch : %d, loss : %1.5f" %(epoch, loss.item()))
+        optimizer.step()
+    print("Epoch : %d, loss : %1.5f" %(epoch, loss.item()))
+        
 
