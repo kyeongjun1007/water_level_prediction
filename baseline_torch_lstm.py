@@ -12,7 +12,7 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 '''Setting------------------------------------------------------------------'''
 
-os.chdir("C:/Users/Kyeongjun/Desktop/water_level_pred")
+os.chdir("C:/Users/user/Desktop/water_level_pred")
 
 def read_csv_by_dir(path, index_col=None):
     df_raw = pd.DataFrame()
@@ -23,7 +23,7 @@ def read_csv_by_dir(path, index_col=None):
         df_raw = pd.concat((df_raw,df),axis=0)
     return df_raw
 
-path = 'C:/Users/Kyeongjun/Desktop/water_level_pred/competition_data'
+path = 'C:/Users/user/Desktop/water_level_pred/competition_data'
 _df_rf_raw = read_csv_by_dir('/'.join([path,'rf_data']),
                             index_col=0)
 
@@ -119,11 +119,10 @@ train_y = y.iloc[:k,:]
 test_y = y.iloc[k:,:]
 
 # sliding window에 맞게 데이터 조정 (필요없는 앞, 뒤 잘라냄)
-'''이거 t시점 데이터 하나 빼고 t-144 시점 하나 추가하게 바꿔야한다...'''
 window_size = 144
 
-train_y = train_y.iloc[(window_size-1):,:]
-test_y = test_y.iloc[(window_size-1):,:]
+train_y = train_y.iloc[window_size:,:]
+test_y = test_y.iloc[window_size:,:]
 
 # 각 y Variable 적용
 train_y = np.array(train_y, dtype=float)
@@ -159,8 +158,8 @@ class LSTM(nn.Module) :
         
         self.lstm = nn.LSTM(input_size = input_size, hidden_size = hidden_size,
                             num_layers = num_layers, batch_first = True)
-        self.fc_1 = nn.Linear(hidden_size, 128)
-        self.fc = nn.Linear(128,num_classes)
+        self.fc_1 = nn.Linear(hidden_size, 8)
+        self.fc = nn.Linear(8,num_classes)
         self.relu = nn.ReLU()
         
     def forward(self, x) :
@@ -175,15 +174,15 @@ class LSTM(nn.Module) :
         return out
 
 # training settings
-num_epochs = 50
-learning_rate = 0.05
+num_epochs = 10
+learning_rate = 0.1
 
 input_size = 12
 hidden_size = 8
 num_layers = 1
 
 num_classes = 4
-seq_length = 144
+seq_length = window_size
 
 model = LSTM(num_classes, input_size, hidden_size, num_layers, seq_length)
 
@@ -202,7 +201,7 @@ for epoch in range(num_epochs) :
     
         optimizer.step()
     print("Epoch : %d, loss : %1.5f" %(epoch, loss.item()))
-    learning_rate -= 0.001
+    learning_rate -= 0.01
 
 '''Model_validation---------------------------------------------------------'''
 
