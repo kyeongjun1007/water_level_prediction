@@ -4,15 +4,15 @@ import pandas as pd
 
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset,TensorDataset, DataLoader
+from torch.utils.data import Dataset, DataLoader
 from torch.autograd import Variable
-from tqdm import tqdm_notebook
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.model_selection import train_test_split
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-os.chdir("C:/Users/user/Desktop/water_level_pred")
+'''Setting------------------------------------------------------------------'''
+
+os.chdir("C:/Users/Kyeongjun/Desktop/water_level_pred")
 
 def read_csv_by_dir(path, index_col=None):
     df_raw = pd.DataFrame()
@@ -23,7 +23,7 @@ def read_csv_by_dir(path, index_col=None):
         df_raw = pd.concat((df_raw,df),axis=0)
     return df_raw
 
-path = 'C:/Users/user/Desktop/water_level_pred/competition_data'
+path = 'C:/Users/Kyeongjun/Desktop/water_level_pred/competition_data'
 _df_rf_raw = read_csv_by_dir('/'.join([path,'rf_data']),
                             index_col=0)
 
@@ -53,17 +53,17 @@ del(df_rf, df_water)
 # data preprocessing
 del(data['fw_1018680'])
 
-#X_ss = data.iloc[:-1,[0,1,2,3,4,5,7,10,12,13,14,15]]
-#y_ms = data.iloc[1:,[6,8,9,11]]
+data_submission = data.copy(deep=True)
+
+'''sliding window 없는 버전'''
+#X = data.iloc[:-1,[0,1,2,3,4,5,7,10,12,13,14,15]]
+#y = data.iloc[1:,[6,8,9,11]]
 #
-##ms = MinMaxScaler()
-##ss = StandardScaler()
-##
-##X_ss = ss.fit_transform(X)
-##y_ms = ms.fit_transform(y)
+#ms = MinMaxScaler()
+#ss = StandardScaler()
 #
-#X_ss  = np.array(X_ss)
-#y_ms = np.array(y_ms)
+#X_ss = ss.fit_transform(X)
+#y_ms = ms.fit_transform(y)
 #
 #k = len(data[data.index>='2022-06-01'])
 #
@@ -86,6 +86,8 @@ del(data['fw_1018680'])
 #                                                    1,X_train_tensors.shape[1]))
 #X_test_tensors_f = torch.reshape(X_test_tensors, (X_test_tensors.shape[0],
 #                                                    1,X_test_tensors.shape[1]))
+
+'''preprocessing------------------------------------------------------------'''
 
 class SlidingWindow(Dataset) :
     def __init__(self, data, window) :
@@ -117,9 +119,8 @@ train_y = y.iloc[:k,:]
 test_y = y.iloc[k:,:]
 
 # sliding window에 맞게 데이터 조정 (필요없는 앞, 뒤 잘라냄)
+'''이거 t시점 데이터 하나 빼고 t-144 시점 하나 추가하게 바꿔야한다...'''
 window_size = 144
-train_X = train_X.iloc[:-(window_size-1),:]
-test_X = test_X.iloc[:-(window_size-1),:]
 
 train_y = train_y.iloc[(window_size-1):,:]
 test_y = test_y.iloc[(window_size-1):,:]
@@ -146,7 +147,7 @@ test_dl = DataLoader(dataset=test_x_dataset,
            batch_size=1,
            shuffle=False)
 
-
+'''Model_training-----------------------------------------------------------'''
 class LSTM(nn.Module) :
     def __init__(self, num_classes, input_size, hidden_size, num_layers, seq_length) :
         super(LSTM, self).__init__()
@@ -173,8 +174,9 @@ class LSTM(nn.Module) :
         out = self.fc(out)
         return out
 
-num_epochs = 10
-learning_rate = 0.01
+# training settings
+num_epochs = 50
+learning_rate = 0.05
 
 input_size = 12
 hidden_size = 8
@@ -188,6 +190,7 @@ model = LSTM(num_classes, input_size, hidden_size, num_layers, seq_length)
 criterion = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
+# training
 for epoch in range(num_epochs) :
     for i, window in enumerate(train_dl):
         window = window.type(torch.float32)
@@ -199,5 +202,44 @@ for epoch in range(num_epochs) :
     
         optimizer.step()
     print("Epoch : %d, loss : %1.5f" %(epoch, loss.item()))
-        
+    learning_rate -= 0.001
 
+'''Model_validation---------------------------------------------------------'''
+
+# validation
+for i, window in enumerate(test_dl) :
+    window = window.type(torch.float32)
+    window = Variable(window)
+    outputs = model.forward(window)
+    loss = criterion(outputs, y_test_tensors[i].view(1,4))
+    
+print("MSE of Validation : %1.5f" % loss.item())
+
+'''Extract result-----------------------------------------------------------'''
+
+# DataLoader 생성
+data_submission = data_submission[data_submission.index >= '2022-05-31']
+submit_X = data_submission.iloc[:,[0,1,2,3,4,5,7,10,12,13,14,15]]
+
+submit_X = torch.tensor(np.array(submit_X, dtype=float))
+submit_x_dataset = SlidingWindow(data=submit_X, window=144)
+submit_dl = DataLoader(dataset=submit_x_dataset,
+           batch_size=1,
+           shuffle=False)
+
+# extract result
+result = []
+
+for i, window in enumerate(submit_dl) :
+    window = window.type(torch.float32)
+    window = Variable(window)
+    outputs = model.forward(window)
+    result.append([i.item() for i in outputs[0]])
+    
+
+# save result to csv file
+result = np.array(result)
+
+submission.iloc[:,:] = result
+
+submission.to_csv("result_window.csv")
