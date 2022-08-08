@@ -107,7 +107,7 @@ class SlidingWindow(Dataset) :
 k = len(data[data.index>='2022-06-01'])
 data = data.iloc[:-k,:]
 
-X = data.iloc[:,[0,1,2,3,4,5,7,10,12,13,14,15]]
+X = data.iloc[:,[0,1,2,3,4,5,7,10,12]]
 y = data.iloc[:,[6,8,9,11]]
 
 # train_test_split
@@ -119,7 +119,7 @@ train_y = y.iloc[:k,:]
 test_y = y.iloc[k:,:]
 
 # sliding window에 맞게 데이터 조정 (필요없는 앞, 뒤 잘라냄)
-window_size = 144
+window_size = 144*3
 
 train_y = train_y.iloc[window_size:,:]
 test_y = test_y.iloc[window_size:,:]
@@ -136,12 +136,12 @@ y_test_tensors = Variable(torch.Tensor(test_y))
 train_X = torch.tensor(np.array(train_X, dtype=float))
 test_X = torch.tensor(np.array(test_X, dtype=float))
 
-train_x_dataset = SlidingWindow(data=train_X, window=144)
+train_x_dataset = SlidingWindow(data=train_X, window=window_size)
 train_dl = DataLoader(dataset=train_x_dataset,
            batch_size=1,
            shuffle=False)
 
-test_x_dataset = SlidingWindow(data=test_X, window=144)
+test_x_dataset = SlidingWindow(data=test_X, window=window_size)
 test_dl = DataLoader(dataset=test_x_dataset,
            batch_size=1,
            shuffle=False)
@@ -159,6 +159,8 @@ class LSTM(nn.Module) :
         self.lstm = nn.LSTM(input_size = input_size, hidden_size = hidden_size,
                             num_layers = num_layers, batch_first = True)
         self.fc_1 = nn.Linear(hidden_size, 8)
+        #self.fc_2 = nn.Linear(256, 256)
+        #self.fc_3 = nn.Linear(256, 128)
         self.fc = nn.Linear(8,num_classes)
         self.relu = nn.ReLU()
         
@@ -169,22 +171,25 @@ class LSTM(nn.Module) :
         hn = hn.view(-1, self.hidden_size)
         out = self.relu(hn)
         out = self.fc_1(out)
+        #out = self.fc_2(out)
+        #out = self.fc_3(out)
         out = self.relu(out)
         out = self.fc(out)
         return out
 
 # training settings
 num_epochs = 10
-learning_rate = 0.1
+learning_rate = 0.01
 
-input_size = 12
-hidden_size = 8
+input_size = 9
+hidden_size = 256
 num_layers = 1
 
 num_classes = 4
 seq_length = window_size
 
 model = LSTM(num_classes, input_size, hidden_size, num_layers, seq_length)
+
 
 criterion = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -200,8 +205,9 @@ for epoch in range(num_epochs) :
         loss.backward()
     
         optimizer.step()
+        print("window step : %d, loss : %1.5f" %(i, loss.item()))
     print("Epoch : %d, loss : %1.5f" %(epoch, loss.item()))
-    learning_rate -= 0.01
+
 
 '''Model_validation---------------------------------------------------------'''
 
@@ -221,7 +227,7 @@ data_submission = data_submission[data_submission.index >= '2022-05-31']
 submit_X = data_submission.iloc[:,[0,1,2,3,4,5,7,10,12,13,14,15]]
 
 submit_X = torch.tensor(np.array(submit_X, dtype=float))
-submit_x_dataset = SlidingWindow(data=submit_X, window=144)
+submit_x_dataset = SlidingWindow(data=submit_X, window=window_size)
 submit_dl = DataLoader(dataset=submit_x_dataset,
            batch_size=1,
            shuffle=False)
@@ -234,7 +240,7 @@ for i, window in enumerate(submit_dl) :
     window = Variable(window)
     outputs = model.forward(window)
     result.append([i.item() for i in outputs[0]])
-    
+
 
 # save result to csv file
 result = np.array(result)

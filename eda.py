@@ -1,7 +1,8 @@
 import os
 import numpy as np
 import pandas as pd
-from tensorflow import keras
+import missingno as msno
+import matplotlib.pyplot as plt
 
 os.chdir("C:/Users/user/Desktop/water_level_pred")
 
@@ -34,32 +35,25 @@ df_water.name = "water_data"
 submission=_submission_raw.copy()
 submission.name = "submission"
 
-# 일단 nan은 평균으로 대체한 뒤 성능 확인해보자
-df_water.fillna(df_water.mean(),inplace=True)
+# 결측치 위치 확인
+%matplotlib inline
 
-data = pd.concat((df_water, df_rf), axis=1)
+msno.matrix(df_rf)
+msno.matrix(df_water)                          # fw_1018608은 버리자.
 
-# MLP modeling
-train = data[data.index<'2022-06-01']
-test = data[data.index>='2022-06-01']
+# line plot
+plt.plot(range(len(df_water.iloc[:,:])),df_water.iloc[:,[6,8,10,12]]) # index 길어서 plotting 오래걸림. x축을 걍 range로 대체
+plt.plot(range(len(df_water.iloc[:,:])),df_water.iloc[:,0:6])
+plt.plot(range(len(df_water.iloc[:6*24*365,:])),df_rf.iloc[:6*24*365,:])
 
+# # 일단 nan은 평균으로 대체한 뒤 eda
+# df_water.fillna(df_water.mean(),inplace=True)
 
-trainX = train.iloc[:-1, :]
-trainY = train.iloc[1:,[6,8,10,12]]
-testX = test.iloc[:-1, :]
-testY = test.iloc[1:,[6,8,10,12]]
+# data = pd.concat((df_water, df_rf), axis=1)
 
-input_num = 17
-output_num = 4
+# del(df_rf, df_water)
 
-MLP = keras.Sequential()
-MLP.add(keras.layers.Input(shape = (input_num,)))
-MLP.add(keras.layers.Dense(8, activation = "relu"))
-MLP.add(keras.layers.Dense(output_num, activation = "relu"))
+# # data preprocessing
+# del(data['fw_1018680'])
 
-Adam = keras.optimizers.Adam(learning_rate = 0.03)
-MLP.compile(optimizer = Adam, loss = 'mse', metrics = ['mse'])
-
-MLP.fit(trainX, trainY, epochs = 100, batch_size = 144)
-
-MLP.evaluate(testX, testY)
+# data_submission = data.copy(deep=True)
