@@ -9,6 +9,7 @@ from torch.autograd import Variable
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+cuda = True if torch.cuda.is_available() else False
 
 '''Setting------------------------------------------------------------------'''
 
@@ -107,7 +108,7 @@ class SlidingWindow(Dataset) :
 k = len(data[data.index>='2022-06-01'])
 data = data.iloc[:-k,:]
 
-X = data.iloc[:,[0,1,2,3,4,5,7,10,12]]
+X = data.iloc[:,[0,1,2,3,4,5,7,10,12,13,14,15]]
 y = data.iloc[:,[6,8,9,11]]
 
 # train_test_split
@@ -119,7 +120,7 @@ train_y = y.iloc[:k,:]
 test_y = y.iloc[k:,:]
 
 # sliding window에 맞게 데이터 조정 (필요없는 앞, 뒤 잘라냄)
-window_size = 144*3
+window_size = 144*2
 
 train_y = train_y.iloc[window_size:,:]
 test_y = test_y.iloc[window_size:,:]
@@ -158,38 +159,43 @@ class LSTM(nn.Module) :
         
         self.lstm = nn.LSTM(input_size = input_size, hidden_size = hidden_size,
                             num_layers = num_layers, batch_first = True)
-        self.fc_1 = nn.Linear(hidden_size, 8)
-        #self.fc_2 = nn.Linear(256, 256)
-        #self.fc_3 = nn.Linear(256, 128)
-        self.fc = nn.Linear(8,num_classes)
+        self.fc_1 = nn.Linear(hidden_size, 256)
+        self.fc_2 = nn.Linear(256, 256)
+        self.fc_3 = nn.Linear(256, 128)
+        self.fc = nn.Linear(128,num_classes)
         self.relu = nn.ReLU()
         
     def forward(self, x) :
-        h_0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size))
-        c_0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size))
+        if torch.cuda.is_available() :
+            h_0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size)).cuda()
+            c_0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size)).cuda()
+        else :
+            h_0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size))
+            c_0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size))
         output, (hn, cn) = self.lstm(x, (h_0, c_0))
         hn = hn.view(-1, self.hidden_size)
         out = self.relu(hn)
         out = self.fc_1(out)
-        #out = self.fc_2(out)
-        #out = self.fc_3(out)
+        out = self.fc_2(out)
+        out = self.fc_3(out)
         out = self.relu(out)
         out = self.fc(out)
         return out
 
 # training settings
-num_epochs = 10
-learning_rate = 0.01
+num_epochs = 20
+learning_rate = 0.001
 
-input_size = 9
-hidden_size = 256
+input_size = 12
+hidden_size = 512
 num_layers = 1
 
 num_classes = 4
 seq_length = window_size
 
 model = LSTM(num_classes, input_size, hidden_size, num_layers, seq_length)
-
+if torch.cuda.is_available() :
+    model.cuda()
 
 criterion = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -198,14 +204,21 @@ optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 for epoch in range(num_epochs) :
     for i, window in enumerate(train_dl):
         window = window.type(torch.float32)
-        window = Variable(window)
+        
+        if torch.cuda.is_available() :
+            window = Variable(window.cuda())
+        else : 
+            window = Variable(window)
         optimizer.zero_grad()
         outputs = model.forward(window)
         loss = criterion(outputs, y_train_tensors[i].view(1,4))
+        if torch.cuda.is_available() :
+            loss.cuda()
+        
         loss.backward()
     
         optimizer.step()
-        print("window step : %d, loss : %1.5f" %(i, loss.item()))
+        #print("window step : %d, loss : %1.5f" %(i, loss.item()))
     print("Epoch : %d, loss : %1.5f" %(epoch, loss.item()))
 
 
@@ -217,6 +230,7 @@ for i, window in enumerate(test_dl) :
     window = Variable(window)
     outputs = model.forward(window)
     loss = criterion(outputs, y_test_tensors[i].view(1,4))
+    print("MSE of Validation : %1.5f" % loss.item())
     
 print("MSE of Validation : %1.5f" % loss.item())
 
